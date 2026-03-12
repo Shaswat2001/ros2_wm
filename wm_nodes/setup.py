@@ -23,7 +23,10 @@ setup(
         ],
     },
     entry_points={
-        'console_scripts': [
+        "console_scripts": [
+            "imagination_server_node = wm_nodes.imagination_server_node:main",
+            "planner_node = wm_nodes.planner_node:main",
+            "visualizer_node = wm_nodes.visualizer_node:main",
         ],
     },
 )
