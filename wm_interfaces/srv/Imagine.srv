@@ -1,0 +1,22 @@
+# Current belief/state
+float32[] current_state
+
+# Packed candidate action sequences
+float32[] action_sequences
+
+# Dimensions
+uint32 num_candidates
+uint32 horizon
+uint32 state_dim
+uint32 action_dim
+
+---
+
+# Packed predicted trajectories
+float32[] predicted_states
+
+#score per candidate
+float32[] scores
+
+# Index of best candidate
+uint32 best_index
