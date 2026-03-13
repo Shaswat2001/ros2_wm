@@ -8,8 +8,6 @@ def generate_launch_description():
     env_id = LaunchConfiguration("env_id")
     num_candidates = LaunchConfiguration("num_candidates")
     horizon = LaunchConfiguration("horizon")
-    action_low = LaunchConfiguration("action_low")
-    action_high = LaunchConfiguration("action_high")
     timer_period = LaunchConfiguration("timer_period")
     max_steps_per_episode = LaunchConfiguration("max_steps_per_episode")
     seed = LaunchConfiguration("seed")
@@ -18,8 +16,6 @@ def generate_launch_description():
         DeclareLaunchArgument("env_id", default_value="Pendulum-v1"),
         DeclareLaunchArgument("num_candidates", default_value="32"),
         DeclareLaunchArgument("horizon", default_value="5"),
-        DeclareLaunchArgument("action_low", default_value="-2.0"),
-        DeclareLaunchArgument("action_high", default_value="2.0"),
         DeclareLaunchArgument("timer_period", default_value="0.1"),
         DeclareLaunchArgument("max_steps_per_episode", default_value="200"),
         DeclareLaunchArgument("seed", default_value="0"),
@@ -44,8 +40,6 @@ def generate_launch_description():
                 "env_id": env_id,
                 "num_candidates": num_candidates,
                 "horizon": horizon,
-                "action_low": action_low,
-                "action_high": action_high,
                 "timer_period": timer_period,
                 "max_steps_per_episode": max_steps_per_episode,
                 "seed": seed,

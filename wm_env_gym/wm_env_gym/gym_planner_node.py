@@ -17,8 +17,8 @@ class GymPlannerNode(Node):
         self.declare_parameter("env_id", "Pendulum-v1")
         self.declare_parameter("num_candidates", 32)
         self.declare_parameter("horizon", 5)
-        self.declare_parameter("action_low", -2.0)
-        self.declare_parameter("action_high", 2.0)
+        self.declare_parameter("action_low", None)
+        self.declare_parameter("action_high", None)
         self.declare_parameter("timer_period", 0.1)
         self.declare_parameter("max_steps_per_episode", 200)
         self.declare_parameter("seed", 0)
@@ -26,8 +26,8 @@ class GymPlannerNode(Node):
         self._env_id = str(self.get_parameter("env_id").value)
         self._num_candidates = int(self.get_parameter("num_candidates").value)
         self._horizon = int(self.get_parameter("horizon").value)
-        self._action_low = float(self.get_parameter("action_low").value)
-        self._action_high = float(self.get_parameter("action_high").value)
+        action_low_param = self.get_parameter("action_low").value
+        action_high_param = self.get_parameter("action_high").value
         timer_period = float(self.get_parameter("timer_period").value)
         self._max_steps_per_episode = int(self.get_parameter("max_steps_per_episode").value)
         self._seed = int(self.get_parameter("seed").value)
@@ -38,6 +38,39 @@ class GymPlannerNode(Node):
 
         self._env = gym.make(self._env_id)
         self._obs, self._info = self._env.reset(seed=self._seed)
+
+        env_action_low = np.asarray(self._env.action_space.low, dtype=np.float32)
+        env_action_high = np.asarray(self._env.action_space.high, dtype=np.float32)
+
+        if env_action_low.size != self._action_dim or env_action_high.size != self._action_dim:
+            raise ValueError(
+                "Environment action space shape does not match adapter action_dim: "
+                f"low shape={env_action_low.shape}, "
+                f"high shape={env_action_high.shape}, "
+                f"adapter action_dim={self._action_dim}"
+            )
+
+        if action_low_param is None:
+            if not np.allclose(env_action_low, env_action_low[0]):
+                raise ValueError(
+                    "Per-dimension action_low values are not all equal. "
+                    "Current planner only supports scalar sampling bounds."
+                )
+            self._action_low = float(env_action_low[0])
+        else:
+            self._action_low = float(action_low_param)
+
+        if action_high_param is None:
+            if not np.allclose(env_action_high, env_action_high[0]):
+                raise ValueError(
+                    "Per-dimension action_high values are not all equal. "
+                    "Current planner only supports scalar sampling bounds."
+                )
+            self._action_high = float(env_action_high[0])
+        else:
+            self._action_high = float(action_high_param)
+
+
         self._episode_step = 0
         self._episode_idx = 0
         self._episode_return = 0.0
