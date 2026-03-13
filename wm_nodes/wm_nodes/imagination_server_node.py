@@ -4,9 +4,8 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 
-from wm_core.oracle_gym_backend import OracleGymBackend
-from wm_env_gym.adapters.pendulum_adapter import PendulumAdapter
-from wm_core.dummy_backend import DummyPointMassBackend
+from wm_core.backend_registry import create_backend
+from wm_env_gym.adapter_registry import create_gym_adapter
 from wm_interfaces.srv import Imagine
 
 class ImaginationServerNode(Node):
@@ -19,14 +18,17 @@ class ImaginationServerNode(Node):
         backend_type = str(self.get_parameter("backend_type").value)
         env_id = str(self.get_parameter("env_id").value)
 
-        if backend_type == "point_mass":
-            self._backend = DummyPointMassBackend()
-        elif backend_type == "oracle_gym":
-            if env_id != "Pendulum-v1":
-                raise ValueError(f"Unsupported env_id for oracle_gym backend: {env_id}")
-            self._backend = OracleGymBackend(env_id=env_id, adapter=PendulumAdapter())
-        else:
-            raise ValueError(f"Unsupported backend_type: {backend_type}")
+        backend_kwargs = {}
+
+        if backend_type == "oracle_gym":
+
+            backend_kwargs["env_id"] = env_id
+            backend_kwargs["adapter"] = create_gym_adapter(env_id)
+
+        self._backend = create_backend(
+            backend_type,
+            **backend_kwargs
+        )
 
         self._service = self.create_service(
             Imagine,

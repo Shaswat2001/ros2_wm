@@ -7,7 +7,7 @@ from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray
 
 from wm_interfaces.srv import Imagine
-from wm_env_gym.adapters.pendulum_adapter import PendulumAdapter
+from wm_env_gym.adapter_registry import create_gym_adapter
 
 
 class GymPlannerNode(Node):
@@ -32,10 +32,7 @@ class GymPlannerNode(Node):
         self._max_steps_per_episode = int(self.get_parameter("max_steps_per_episode").value)
         self._seed = int(self.get_parameter("seed").value)
 
-        if self._env_id != "Pendulum-v1":
-            raise ValueError(f"Only Pendulum-v1 is supported right now, got {self._env_id}")
-
-        self._adapter = PendulumAdapter()
+        self._adapter = create_gym_adapter(self._env_id)
         self._state_dim = self._adapter.get_state_dim()
         self._action_dim = self._adapter.get_action_dim()
 
@@ -43,6 +40,7 @@ class GymPlannerNode(Node):
         self._obs, self._info = self._env.reset(seed=self._seed)
         self._episode_step = 0
         self._episode_idx = 0
+        self._episode_return = 0.0
 
         self._client = self.create_client(Imagine, "wm/imagine")
         while not self._client.wait_for_service(timeout_sec=1.0):
@@ -136,16 +134,17 @@ class GymPlannerNode(Node):
             self._obs = obs
             self._info = info
             self._episode_step += 1
+            self._episode_return += reward
 
             current_state = self._adapter.obs_to_state(self._obs)
             self._publish_state(current_state)
 
             self.get_logger().info(
-                f"episode={self._episode_idx} step={self._episode_step} "
-                f"best_action={best_action.tolist()} "
-                f"best_score={float(scores[best_index]):.4f} "
-                f"reward={float(reward):.4f} "
-                f"terminated={terminated} truncated={truncated}"
+                f"episode={self._episode_idx} "
+                f"step={self._episode_step} "
+                f"reward={float(reward):.3f} "
+                f"return={self._episode_return:.3f} "
+                f"best_score={float(scores[best_index]):.3f}"
             )
 
             if terminated or truncated or self._episode_step >= self._max_steps_per_episode:
@@ -155,8 +154,16 @@ class GymPlannerNode(Node):
             self.get_logger().error(f"Failed to process imagination response: {exc}")
 
     def _reset_env(self) -> None:
+
+        self.get_logger().info(
+            f"Episode {self._episode_idx} finished | "
+            f"length={self._episode_step} "
+            f"return={self._episode_return:.3f}"
+        )
+            
         self._episode_idx += 1
         self._episode_step = 0
+        self._episode_return = 0.0
         self._obs, self._info = self._env.reset()
         current_state = self._adapter.obs_to_state(self._obs)
         self._publish_state(current_state)

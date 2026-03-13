@@ -5,7 +5,6 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-
     env_id = LaunchConfiguration("env_id")
     num_candidates = LaunchConfiguration("num_candidates")
     horizon = LaunchConfiguration("horizon")
@@ -16,46 +15,14 @@ def generate_launch_description():
     seed = LaunchConfiguration("seed")
 
     return LaunchDescription([
-
-        DeclareLaunchArgument(
-            "env_id",
-            default_value="Pendulum-v1"
-        ),
-
-        DeclareLaunchArgument(
-            "num_candidates",
-            default_value="32"
-        ),
-
-        DeclareLaunchArgument(
-            "horizon",
-            default_value="5"
-        ),
-
-        DeclareLaunchArgument(
-            "action_low",
-            default_value="-2.0"
-        ),
-
-        DeclareLaunchArgument(
-            "action_high",
-            default_value="2.0"
-        ),
-
-        DeclareLaunchArgument(
-            "timer_period",
-            default_value="0.1"
-        ),
-
-        DeclareLaunchArgument(
-            "max_steps_per_episode",
-            default_value="200"
-        ),
-
-        DeclareLaunchArgument(
-            "seed",
-            default_value="0"
-        ),
+        DeclareLaunchArgument("env_id", default_value="Pendulum-v1"),
+        DeclareLaunchArgument("num_candidates", default_value="32"),
+        DeclareLaunchArgument("horizon", default_value="5"),
+        DeclareLaunchArgument("action_low", default_value="-2.0"),
+        DeclareLaunchArgument("action_high", default_value="2.0"),
+        DeclareLaunchArgument("timer_period", default_value="0.1"),
+        DeclareLaunchArgument("max_steps_per_episode", default_value="200"),
+        DeclareLaunchArgument("seed", default_value="0"),
 
         Node(
             package="wm_nodes",
@@ -84,5 +51,4 @@ def generate_launch_description():
                 "seed": seed,
             }],
         ),
-
     ])
