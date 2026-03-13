@@ -24,7 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            "gym_planner_node = wm_env_gym.gym_planner_node:main"
+            "gym_planner_node = wm_env_gym.gym_planner_node:main",
+            "collect_pendulum_dataset = wm_env_gym.dataset.collect_pendulum_dataset:main",
         ],
     },
 )

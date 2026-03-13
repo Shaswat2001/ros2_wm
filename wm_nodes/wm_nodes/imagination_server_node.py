@@ -14,16 +14,25 @@ class ImaginationServerNode(Node):
 
         self.declare_parameter("backend_type", "point_mass")
         self.declare_parameter("env_id", "Pendulum-v1")
+        self.declare_parameter("checkpoint_path", "")
+        self.declare_parameter("device", "cpu")
 
         backend_type = str(self.get_parameter("backend_type").value)
         env_id = str(self.get_parameter("env_id").value)
-
+        checkpoint_path = str(self.get_parameter("checkpoint_path").value)
+        device = str(self.get_parameter("device").value)
+        
         backend_kwargs = {}
 
         if backend_type == "oracle_gym":
 
             backend_kwargs["env_id"] = env_id
             backend_kwargs["adapter"] = create_gym_adapter(env_id)
+        
+        elif backend_type == "learned_mlp":
+            backend_kwargs["checkpoint_path"] = checkpoint_path
+            backend_kwargs["device"] = device
+
 
         self._backend = create_backend(
             backend_type,

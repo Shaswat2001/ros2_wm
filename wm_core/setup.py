@@ -24,6 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            "train_pendulum_dynamics = wm_core.train.train_pendulum_dynamics:main",
         ],
     },
 )
