@@ -15,7 +15,8 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>wm_nodes</exec_depend>
-
+  <exec_depend>wm_env_gym</exec_depend>
+  
   <export>
     <build_type>ament_python</build_type>
   </export>

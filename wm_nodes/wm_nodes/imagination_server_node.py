@@ -4,15 +4,29 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 
+from wm_core.oracle_gym_backend import OracleGymBackend
+from wm_env_gym.adapters.pendulum_adapter import PendulumAdapter
 from wm_core.dummy_backend import DummyPointMassBackend
 from wm_interfaces.srv import Imagine
-
 
 class ImaginationServerNode(Node):
     def __init__(self) -> None:
         super().__init__("imagination_server")
 
-        self._backend = DummyPointMassBackend()
+        self.declare_parameter("backend_type", "point_mass")
+        self.declare_parameter("env_id", "Pendulum-v1")
+
+        backend_type = str(self.get_parameter("backend_type").value)
+        env_id = str(self.get_parameter("env_id").value)
+
+        if backend_type == "point_mass":
+            self._backend = DummyPointMassBackend()
+        elif backend_type == "oracle_gym":
+            if env_id != "Pendulum-v1":
+                raise ValueError(f"Unsupported env_id for oracle_gym backend: {env_id}")
+            self._backend = OracleGymBackend(env_id=env_id, adapter=PendulumAdapter())
+        else:
+            raise ValueError(f"Unsupported backend_type: {backend_type}")
 
         self._service = self.create_service(
             Imagine,
@@ -20,7 +34,9 @@ class ImaginationServerNode(Node):
             self.handle_imagine,
         )
 
-        self.get_logger().info("Imagination server ready on service /wm/imagine")
+        self.get_logger().info(
+            f"Imagination server ready on service /wm/imagine with backend_type={backend_type}"
+        )
 
     def handle_imagine(self, request: Imagine.Request, response: Imagine.Response) -> Imagine.Response:
         try:
@@ -83,6 +99,11 @@ class ImaginationServerNode(Node):
             response.scores = []
             response.best_index = 0
             return response
+    
+    def destroy_node(self) -> None:
+        if hasattr(self._backend, "close"):
+            self._backend.close()
+        super().destroy_node()
 
 
 def main(args: list[str] | None = None) -> None:
