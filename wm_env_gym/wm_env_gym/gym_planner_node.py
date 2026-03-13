@@ -1,92 +1,76 @@
 from __future__ import annotations
 
 import numpy as np
+import gymnasium as gym
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray
 
 from wm_interfaces.srv import Imagine
+from wm_env_gym.adapters.pendulum_adapter import PendulumAdapter
 
 
-class PlannerNode(Node):
+class GymPlannerNode(Node):
     def __init__(self) -> None:
-        super().__init__("planner_node")
+        super().__init__("gym_planner_node")
 
-        self.declare_parameter("start_x", 0.0)
-        self.declare_parameter("start_y", 0.0)
-        self.declare_parameter("goal_x", 5.0)
-        self.declare_parameter("goal_y", 5.0)
+        self.declare_parameter("env_id", "Pendulum-v1")
         self.declare_parameter("num_candidates", 32)
         self.declare_parameter("horizon", 5)
-        self.declare_parameter("action_low", -1.0)
-        self.declare_parameter("action_high", 1.0)
-        self.declare_parameter("timer_period", 0.5)
-        self.declare_parameter("max_steps", 30)
-        self.declare_parameter("goal_tolerance", 0.5)
+        self.declare_parameter("action_low", -2.0)
+        self.declare_parameter("action_high", 2.0)
+        self.declare_parameter("timer_period", 0.1)
+        self.declare_parameter("max_steps_per_episode", 200)
+        self.declare_parameter("seed", 0)
+
+        self._env_id = str(self.get_parameter("env_id").value)
+        self._num_candidates = int(self.get_parameter("num_candidates").value)
+        self._horizon = int(self.get_parameter("horizon").value)
+        self._action_low = float(self.get_parameter("action_low").value)
+        self._action_high = float(self.get_parameter("action_high").value)
+        timer_period = float(self.get_parameter("timer_period").value)
+        self._max_steps_per_episode = int(self.get_parameter("max_steps_per_episode").value)
+        self._seed = int(self.get_parameter("seed").value)
+
+        if self._env_id != "Pendulum-v1":
+            raise ValueError(f"Only Pendulum-v1 is supported right now, got {self._env_id}")
+
+        self._adapter = PendulumAdapter()
+        self._state_dim = self._adapter.get_state_dim()
+        self._action_dim = self._adapter.get_action_dim()
+
+        self._env = gym.make(self._env_id)
+        self._obs, self._info = self._env.reset(seed=self._seed)
+        self._episode_step = 0
+        self._episode_idx = 0
 
         self._client = self.create_client(Imagine, "wm/imagine")
         while not self._client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info("Waiting for /wm/imagine service...")
 
         self._action_pub = self.create_publisher(Float32MultiArray, "wm/action_cmd", 10)
-
         self._state_pub = self.create_publisher(Float32MultiArray, "wm/state", 10)
-
         self._rollouts_pub = self.create_publisher(Float32MultiArray, "wm/rollouts", 10)
-
         self._best_rollout_pub = self.create_publisher(Float32MultiArray, "wm/best_rollout", 10)
 
-        # State format: [x, y, goal_x, goal_y]
-        start_x = float(self.get_parameter("start_x").value)
-        start_y = float(self.get_parameter("start_y").value)
-        goal_x = float(self.get_parameter("goal_x").value)
-        goal_y = float(self.get_parameter("goal_y").value)
+        self._publish_state(self._adapter.obs_to_state(self._obs))
 
-        self._current_state = np.array([start_x, start_y, goal_x, goal_y], dtype=np.float32)
-        self._publish_state()
-
-        self._num_candidates = int(self.get_parameter("num_candidates").value)
-        self._horizon = int(self.get_parameter("horizon").value)
-        self._state_dim = 4
-        self._action_dim = 2
-        self._action_low = float(self.get_parameter("action_low").value)
-        self._action_high = float(self.get_parameter("action_high").value)
-
-        self._step_count = 0
-        self._max_steps = int(self.get_parameter("max_steps").value)
-        self._goal_tolerance = float(self.get_parameter("goal_tolerance").value)
-
-        timer_period = float(self.get_parameter("timer_period").value)
         self._timer = self.create_timer(timer_period, self._tick)
 
         self.get_logger().info(
-            f"Planner config: start=({start_x}, {start_y}) "
-            f"goal=({goal_x}, {goal_y}) "
-            f"num_candidates={self._num_candidates} "
-            f"horizon={self._horizon} "
-            f"action_range=[{self._action_low}, {self._action_high}] "
-            f"timer_period={timer_period} "
-            f"max_steps={self._max_steps} "
-            f"goal_tolerance={self._goal_tolerance}"
+            f"GymPlannerNode started: env_id={self._env_id}, "
+            f"num_candidates={self._num_candidates}, horizon={self._horizon}, "
+            f"action_range=[{self._action_low}, {self._action_high}], "
+            f"timer_period={timer_period}, max_steps_per_episode={self._max_steps_per_episode}"
         )
 
-        self.get_logger().info("Planner node started.")
-
     def _tick(self) -> None:
-        if self._step_count >= self._max_steps:
-            self.get_logger().info("Reached max steps. Stopping planner loop.")
-            self._timer.cancel()
-            return
-
-        if self._goal_reached():
-            self.get_logger().info("Goal reached. Stopping planner loop.")
-            self._timer.cancel()
-            return
+        current_state = self._adapter.obs_to_state(self._obs)
 
         action_sequences = self._sample_action_sequences()
 
         request = Imagine.Request()
-        request.current_state = self._current_state.tolist()
+        request.current_state = current_state.tolist()
         request.action_sequences = action_sequences.reshape(-1).tolist()
         request.num_candidates = self._num_candidates
         request.horizon = self._horizon
@@ -118,9 +102,8 @@ class PlannerNode(Node):
                     f"Invalid scores shape: got {scores.shape}, expected {(self._num_candidates,)}"
                 )
                 return
-            
-            predicted_states = np.asarray(response.predicted_states, dtype=np.float32)
 
+            predicted_states = np.asarray(response.predicted_states, dtype=np.float32)
             expected_size = self._num_candidates * (self._horizon + 1) * self._state_dim
             if predicted_states.size != expected_size:
                 self.get_logger().error(
@@ -145,35 +128,48 @@ class PlannerNode(Node):
             self._publish_best_rollout(best_rollout)
 
             best_action = action_sequences[best_index, 0]
+            env_action = self._adapter.action_to_env(best_action)
 
             self._publish_action(best_action)
-            self._apply_action(best_action)
-            self._publish_state()
 
-            self._step_count += 1
+            obs, reward, terminated, truncated, info = self._env.step(env_action)
+            self._obs = obs
+            self._info = info
+            self._episode_step += 1
 
-            dist_to_goal = self._distance_to_goal()
-            best_score = float(scores[best_index])
+            current_state = self._adapter.obs_to_state(self._obs)
+            self._publish_state(current_state)
 
             self.get_logger().info(
-                f"step={self._step_count} "
-                f"state={self._current_state.tolist()} "
+                f"episode={self._episode_idx} step={self._episode_step} "
                 f"best_action={best_action.tolist()} "
-                f"best_score={best_score:.4f} "
-                f"dist_to_goal={dist_to_goal:.4f}"
+                f"best_score={float(scores[best_index]):.4f} "
+                f"reward={float(reward):.4f} "
+                f"terminated={terminated} truncated={truncated}"
             )
+
+            if terminated or truncated or self._episode_step >= self._max_steps_per_episode:
+                self._reset_env()
 
         except Exception as exc:
             self.get_logger().error(f"Failed to process imagination response: {exc}")
+
+    def _reset_env(self) -> None:
+        self._episode_idx += 1
+        self._episode_step = 0
+        self._obs, self._info = self._env.reset()
+        current_state = self._adapter.obs_to_state(self._obs)
+        self._publish_state(current_state)
+        self.get_logger().info(f"Reset environment. episode={self._episode_idx}")
 
     def _publish_action(self, action: np.ndarray) -> None:
         msg = Float32MultiArray()
         msg.data = action.astype(np.float32).tolist()
         self._action_pub.publish(msg)
 
-    def _publish_state(self) -> None:
+    def _publish_state(self, state: np.ndarray) -> None:
         msg = Float32MultiArray()
-        msg.data = self._current_state.astype(np.float32).tolist()
+        msg.data = state.astype(np.float32).tolist()
         self._state_pub.publish(msg)
 
     def _publish_rollouts(self, predicted_states: np.ndarray) -> None:
@@ -186,21 +182,14 @@ class PlannerNode(Node):
         msg.data = best_rollout.astype(np.float32).reshape(-1).tolist()
         self._best_rollout_pub.publish(msg)
 
-    def _apply_action(self, action: np.ndarray) -> None:
-        self._current_state[0:2] = self._current_state[0:2] + action
-
-    def _distance_to_goal(self) -> float:
-        pos = self._current_state[0:2]
-        goal = self._current_state[2:4]
-        return float(np.linalg.norm(pos - goal))
-
-    def _goal_reached(self) -> bool:
-        return self._distance_to_goal() < self._goal_tolerance
+    def destroy_node(self) -> None:
+        self._env.close()
+        super().destroy_node()
 
 
 def main(args: list[str] | None = None) -> None:
     rclpy.init(args=args)
-    node = PlannerNode()
+    node = GymPlannerNode()
 
     try:
         rclpy.spin(node)
