@@ -1,7 +1,7 @@
 # LoadModel.srv
 # Load or swap the world model backend at runtime.
 # Maps to AutoWorldModel.from_pretrained().
----
+
 # ── Request ───────────────────────────────────────────────────
 
 # HuggingFace repo ID (e.g. "SaiResearch/sai_wm")

@@ -4,7 +4,7 @@
 #
 # Maps to: for each candidate, run wm.reset() -> wm.forward(obs) ->
 #          loop wm.predict(action) and collect Trajectory.
----
+
 # ── Request ───────────────────────────────────────────────────
 
 # Current belief state (from /wm/belief_state or a prior forward())

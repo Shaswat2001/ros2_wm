@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>wm_runtime</name>
+  <version>0.1.0</version>
+  <description>
+    ROS2 imagination runtime backed by worldmodel_hub.
+    Wraps AutoWorldModel / ImagineRollout as ROS2 services and topics.
+  </description>
+  <maintainer email="research@competesai.com">ArenaX Labs</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>rclpy</depend>
+  <depend>wm_interfaces</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

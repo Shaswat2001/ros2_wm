@@ -4,7 +4,7 @@
 #
 # This is the "easy mode" API — it handles sampling, rollout, and
 # scoring internally. For fine-grained control, use Imagine.srv.
----
+
 # ── Request ───────────────────────────────────────────────────
 
 # Raw observation to plan from

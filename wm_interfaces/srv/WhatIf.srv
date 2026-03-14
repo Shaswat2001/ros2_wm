@@ -3,7 +3,7 @@
 # "What if I take action sequence A vs action sequence B from this state?"
 #
 # Returns paired rollouts for direct comparison.
----
+
 # ── Request ───────────────────────────────────────────────────
 
 # Starting belief state
