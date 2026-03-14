@@ -1,0 +1,35 @@
+# Imagine.srv
+# Roll out candidate action sequences through the world model.
+# This is the core imagination service.
+#
+# Maps to: for each candidate, run wm.reset() -> wm.forward(obs) ->
+#          loop wm.predict(action) and collect Trajectory.
+---
+# ── Request ───────────────────────────────────────────────────
+
+# Current belief state (from /wm/belief_state or a prior forward())
+wm_interfaces/BeliefState belief
+
+# Candidate action sequences to evaluate
+wm_interfaces/ActionSequence[] candidates
+
+# How many steps to imagine (overrides candidate horizon if set)
+uint32 horizon
+
+# Whether to decode observations at each step (slower but needed for viz)
+bool record_observations
+
+---
+# ── Response ──────────────────────────────────────────────────
+
+# One trajectory per candidate
+wm_interfaces/RolloutTrajectory[] trajectories
+
+# Index of the best trajectory by total reward
+uint32 best_index
+
+# True if the imagination completed successfully
+bool success
+
+# Error message if success is false
+string message

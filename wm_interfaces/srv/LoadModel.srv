@@ -1,0 +1,27 @@
+# LoadModel.srv
+# Load or swap the world model backend at runtime.
+# Maps to AutoWorldModel.from_pretrained().
+---
+# ── Request ───────────────────────────────────────────────────
+
+# HuggingFace repo ID (e.g. "SaiResearch/sai_wm")
+string repo_id
+
+# Subfolder within the repo (e.g. "iris/atari/alien")
+string subfolder
+
+# Device to load onto ("cpu", "cuda:0", etc.)
+string device
+
+# Whether to trust remote code for custom model types
+bool trust_remote_code
+
+---
+# ── Response ──────────────────────────────────────────────────
+
+bool success
+string message
+
+# Info about the loaded model
+string model_type
+string environment

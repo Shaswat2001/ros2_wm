@@ -1,0 +1,38 @@
+# PlanAction.srv
+# High-level planning service: given an observation, sample candidates,
+# imagine futures, and return the best first action.
+#
+# This is the "easy mode" API — it handles sampling, rollout, and
+# scoring internally. For fine-grained control, use Imagine.srv.
+---
+# ── Request ───────────────────────────────────────────────────
+
+# Raw observation to plan from
+wm_interfaces/WorldModelObservation observation
+
+# Number of candidate action sequences to sample
+uint32 num_candidates
+
+# Planning horizon (number of steps to imagine)
+uint32 horizon
+
+# Sampling strategy: "random", "cem", "mppi"
+string sampling_method
+
+# Random seed for reproducibility
+uint32 seed
+
+---
+# ── Response ──────────────────────────────────────────────────
+
+# The best first action to execute
+float32[] best_action
+
+# Full best rollout trajectory
+wm_interfaces/RolloutTrajectory best_rollout
+
+# All scored rollouts (for visualization / debugging)
+wm_interfaces/RolloutSet all_rollouts
+
+bool success
+string message

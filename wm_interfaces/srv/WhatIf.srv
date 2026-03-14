@@ -1,0 +1,33 @@
+# WhatIf.srv
+# Counterfactual query service.
+# "What if I take action sequence A vs action sequence B from this state?"
+#
+# Returns paired rollouts for direct comparison.
+---
+# ── Request ───────────────────────────────────────────────────
+
+# Starting belief state
+wm_interfaces/BeliefState belief
+
+# The action sequences to compare (at least 2)
+wm_interfaces/ActionSequence[] alternatives
+
+# How many steps to imagine
+uint32 horizon
+
+bool record_observations
+
+---
+# ── Response ──────────────────────────────────────────────────
+
+# One trajectory per alternative, in the same order
+wm_interfaces/RolloutTrajectory[] trajectories
+
+# Pairwise reward differences: trajectories[i].total_reward - trajectories[0].total_reward
+float32[] reward_deltas
+
+# Index of the best alternative
+uint32 best_index
+
+bool success
+string message
