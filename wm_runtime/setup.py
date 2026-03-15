@@ -19,7 +19,8 @@ setup(
     entry_points={
         'console_scripts': [
             'model_server = wm_runtime.model_server_node:main',
-            'belief_publisher = wm_runtime.belief_publisher_node:main'
+            'belief_publisher = wm_runtime.belief_publisher_node:main',
+            'rollout_visualizer = wm_runtime.rollout_visualizer_node:main',
         ],
     },
 )
