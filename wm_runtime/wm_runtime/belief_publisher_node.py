@@ -32,7 +32,7 @@ class BeliefPublisherNode(Node):
         self._dataset = None
         self._lock = threading.Lock()
 
-        self._latest_image = Optional[np.ndarray] = None
+        self._latest_image: Optional[np.ndarray] = None
         self._latest_vector: Optional[np.ndarray] = None
         self._latest_joint_state: Optional[JointState] = None
         self._dataset_seed_counter = self.get_parameter('dataset_seed').value

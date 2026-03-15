@@ -1,96 +1,151 @@
 Panels:
   - Class: rviz_common/Displays
+    Help Height: 70
     Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+        - /Status1
+        - /Imagined Frames1
+      Splitter Ratio: 0.5
+    Tree Height: 646
   - Class: rviz_common/Views
+    Expanded:
+      - /Current View1
     Name: Views
+    Splitter Ratio: 0.5
 Visualization Manager:
   Class: ""
   Displays:
-    # ── Grid ──────────────────────────────────────────────────
-    - Class: rviz_default_plugins/Grid
-      Name: Grid
-      Enabled: true
-      Plane Cell Count: 20
-      Cell Size: 0.1
+    - Alpha: 0.5
+      Cell Size: 0.10000000149011612
+      Class: rviz_default_plugins/Grid
       Color: 80; 80; 80
+      Enabled: true
       Line Style:
+        Line Width: 0.029999999329447746
         Value: Lines
+      Name: Grid
       Normal Cell Count: 0
       Offset:
         X: 0
         Y: 0
         Z: 0
       Plane: XY
+      Plane Cell Count: 20
       Reference Frame: wm_latent_space
-
-    # ── All candidate rollouts ────────────────────────────────
+      Value: true
     - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
       Name: Candidate Rollouts
-      Enabled: true
+      Namespaces:
+        {}
       Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
         Value: /wm/viz/rollouts
-        Depth: 5
-        Reliability Policy: Reliable
-
-    # ── Best rollout (highlighted) ────────────────────────────
+      Value: true
     - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
       Name: Best Rollout
-      Enabled: true
+      Namespaces:
+        {}
       Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
         Value: /wm/viz/best_rollout
-        Depth: 5
-        Reliability Policy: Reliable
-
-    # ── Uncertainty cones ─────────────────────────────────────
+      Value: true
     - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
       Name: Uncertainty
-      Enabled: true
+      Namespaces:
+        {}
       Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
         Value: /wm/viz/uncertainty
-        Depth: 5
-        Reliability Policy: Reliable
-
-    # ── Imagined frames ───────────────────────────────────────
+      Value: true
     - Class: rviz_default_plugins/Image
-      Name: Imagined Frames
       Enabled: true
-      Topic:
-        Value: /wm/viz/imagined_frames
-        Depth: 5
-        Reliability Policy: Reliable
       Max Value: 1
+      Median window: 5
       Min Value: 0
+      Name: Imagined Frames
       Normalize Range: true
-
-    # ── TF (static frame for latent space) ────────────────────
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /wm/viz/imagined_frames
+      Value: true
     - Class: rviz_default_plugins/TF
-      Name: TF
       Enabled: false
-
+      Filter (blacklist): ""
+      Filter (whitelist): ""
+      Frame Timeout: 15
+      Frames:
+        All Enabled: true
+      Marker Scale: 1
+      Name: TF
+      Show Arrows: true
+      Show Axes: true
+      Show Names: false
+      Tree:
+        {}
+      Update Interval: 0
+      Value: false
+  Enabled: true
   Global Options:
     Background Color: 30; 30; 30
     Fixed Frame: wm_latent_space
     Frame Rate: 30
-
+  Name: root
+  Tools: ~
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Name: Current View
       Distance: 1.5
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.05999999865889549
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
       Focal Point:
         X: 0
         Y: 0
         Z: 0
       Focal Shape Fixed Size: true
-      Focal Shape Size: 0.05
+      Focal Shape Size: 0.05000000074505806
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.009999999776482582
       Pitch: 0.5
-      Yaw: 0.8
       Target Frame: wm_latent_space
-
+      Value: Orbit (rviz_default_plugins)
+      Yaw: 0.800000011920929
+    Saved: ~
 Window Geometry:
-  Width: 1400
-  Height: 900
   Displays:
     collapsed: false
+  Height: 1241
+  Hide Left Dock: false
+  Hide Right Dock: false
+  Imagined Frames:
+    collapsed: false
+  QMainWindow State: 000000ff00000000fd00000002000000000000019b0000047bfc0200000002fb0000001e0049006d006100670069006e006500640020004600720061006d00650073010000003f000001690000001700fffffffb000000100044006900730070006c00610079007301000001ae0000030c000000cc00ffffff00000001000001c90000047bfc0200000001fb0000000a00560069006500770073010000003f0000047b000000a900ffffff000003270000047b00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:
-    collapsed: true
+    collapsed: false
+  Width: 1687
+  X: 66
+  Y: 32

@@ -77,6 +77,9 @@ class ModelServerNode(Node):
         self.pub_status = self.create_publisher(
             ModelStatus, '/wm/status', 10,
         )
+        self.pub_rollout_set = self.create_publisher(
+            RolloutSet, '/wm/rollout_set', 10,
+        )
 
         # ── Status timer ──────────────────────────────────────
         status_hz = self.get_parameter('status_rate_hz').value
@@ -129,7 +132,7 @@ class ModelServerNode(Node):
             return response
         
         try:
-            belief_latent = np.array(request.belief_latent, dtype=np.float32)
+            belief_latent = np.array(request.belief.latent, dtype=np.float32)
             horizon = request.horizon
 
             trajectories = []
@@ -156,6 +159,13 @@ class ModelServerNode(Node):
             response.success = True
             response.message = f'Imagined {len(trajectories)} candidates.'
             self._total_rollouts += len(trajectories)
+
+            # Publish RolloutSet so the visualizer node can render it
+            self._publish_rollout_set(
+                trajectories=trajectories,
+                best_index=best_idx,
+                belief=request.belief,
+            )
         
         except Exception as e:
             response.success = False
@@ -200,6 +210,13 @@ class ModelServerNode(Node):
             response.best_index = best_idx
             response.success = True
             response.message = f'Compared {len(trajectories)} alternatives.'
+
+            # Publish RolloutSet so the visualizer node can render it
+            self._publish_rollout_set(
+                trajectories=trajectories,
+                best_index=best_idx,
+                belief=request.belief,
+            )
 
         except Exception as e:
             response.success = False
@@ -423,6 +440,26 @@ class ModelServerNode(Node):
         traj.label = candidate.label
 
         return traj
+
+    def _publish_rollout_set(self, trajectories, best_index, belief):
+        """
+        Publish a RolloutSet message to /wm/rollout_set.
+
+        This bridges the service response → topic gap so that the
+        rollout_visualizer_node (and any other subscribers) can react
+        to imagination results without calling services directly.
+        """
+        msg = RolloutSet()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.trajectories = trajectories
+        msg.best_index = best_index
+        msg.belief = belief
+        self.pub_rollout_set.publish(msg)
+
+        self.get_logger().debug(
+            f'Published RolloutSet: {len(trajectories)} trajectories, '
+            f'best_index={best_index}'
+        )
 
     def _publish_status(self):
         """Periodic status heartbeat."""

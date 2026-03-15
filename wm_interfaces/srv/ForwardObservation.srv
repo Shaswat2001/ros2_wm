@@ -1,0 +1,31 @@
+# ForwardObservation.srv
+# Encode an observation through the world model's forward() pass.
+# Returns the resulting belief state (latent representation).
+#
+# This lets the belief_publisher_node delegate forward() to the
+# model_server_node instead of loading a duplicate model copy.
+# The model_server runs wm.reset(seed) -> wm.forward(obs) and
+# returns the latent state + publishes it to /wm/belief_state.
+
+# ── Request ───────────────────────────────────────────────────
+
+# Flattened observation array
+float32[] obs_data
+
+# Shape of the observation (e.g. [3, 64, 64] for an image, [128] for a vector)
+uint32[] obs_shape
+
+# Seed for the world model reset
+uint32 seed
+
+---
+# ── Response ──────────────────────────────────────────────────
+
+# The resulting belief state
+wm_interfaces/BeliefState belief
+
+# True if the forward pass completed successfully
+bool success
+
+# Error message if success is false
+string message

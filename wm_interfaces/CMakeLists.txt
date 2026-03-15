@@ -26,6 +26,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ModelStatus.msg"
 
   # Services
+  "srv/ForwardObservation.srv"
   "srv/Imagine.srv"
   "srv/PlanAction.srv"
   "srv/WhatIf.srv"
