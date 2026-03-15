@@ -6,6 +6,7 @@ Panels:
       Expanded:
         - /Global Options1
         - /Status1
+        - /Forward Frames1
         - /Imagined Frames1
       Splitter Ratio: 0.5
     Tree Height: 646
@@ -70,6 +71,20 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /wm/viz/uncertainty
+      Value: true
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Forward Frames
+      Normalize Range: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /wm/viz/forward_frames
       Value: true
     - Class: rviz_default_plugins/Image
       Enabled: true
@@ -141,9 +156,11 @@ Window Geometry:
   Height: 1241
   Hide Left Dock: false
   Hide Right Dock: false
+  Forward Frames:
+    collapsed: false
   Imagined Frames:
     collapsed: false
-  QMainWindow State: 000000ff00000000fd00000002000000000000019b0000047bfc0200000002fb0000001e0049006d006100670069006e006500640020004600720061006d00650073010000003f000001690000001700fffffffb000000100044006900730070006c00610079007301000001ae0000030c000000cc00ffffff00000001000001c90000047bfc0200000001fb0000000a00560069006500770073010000003f0000047b000000a900ffffff000003270000047b00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd00000002000000000000019b0000047bfc0200000003fb00000018004600720061006d006500730020002800460077006400290100000042000000e80000001700fffffffb0000001e0049006d006100670069006e006500640020004600720061006d00650073010000013000000124000000170000001700fffffffb000000100044006900730070006c006100790073010000025a00000260000000cc00ffffff00000001000001c90000047bfc0200000001fb0000000a00560069006500770073010000003f0000047b000000a900ffffff000003270000047b00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:
     collapsed: false
   Width: 1687

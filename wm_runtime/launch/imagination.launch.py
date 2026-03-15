@@ -36,6 +36,8 @@ def generate_launch_description():
     config_file = PathJoinSubstitution([pkg_share, 'config', 'wm_runtime.yaml'])
 
     # ── Nodes ─────────────────────────────────────────────────
+
+    # model_server: single model owner, all services
     model_server = Node(
         package='wm_runtime',
         executable='model_server',
@@ -52,6 +54,7 @@ def generate_launch_description():
         output='screen',
     )
 
+    # belief_publisher: thin sensor bridge, no model params needed
     belief_publisher = Node(
         package='wm_runtime',
         executable='belief_publisher',
@@ -67,6 +70,7 @@ def generate_launch_description():
         output='screen',
     )
 
+    # rollout_visualizer: subscribes to /wm/rollout_set, publishes markers
     rollout_visualizer = Node(
         package='wm_runtime',
         executable='rollout_visualizer',

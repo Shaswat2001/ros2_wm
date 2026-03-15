@@ -9,6 +9,8 @@
 #       device:=cuda:0 repo_id:=SaiResearch/sai_wm
 
 # ── Model Server ──────────────────────────────────────────────
+# Single owner of the world model. All other nodes talk to it
+# via services. No other node loads a model copy.
 wm_model_server:
   ros__parameters:
     # HuggingFace model to load on startup (empty = wait for /wm/load_model)
@@ -21,9 +23,8 @@ wm_model_server:
     status_rate_hz: 1.0
 
 # ── Belief Publisher ──────────────────────────────────────────
-# The belief publisher is a thin sensor bridge. It does NOT load
-# its own model — it calls the model_server's /wm/forward_observation
-# service. This means only one model copy lives in RAM.
+# Thin sensor bridge. Does NOT load its own model — it calls the
+# model_server's /wm/forward_observation service instead.
 wm_belief_publisher:
   ros__parameters:
     # Observation mode: "dataset" | "image" | "vector"

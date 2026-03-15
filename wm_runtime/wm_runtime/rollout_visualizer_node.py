@@ -11,7 +11,6 @@ from sensor_msgs.msg import Image
 
 from wm_interfaces.msg import RolloutSet, RolloutTrajectory
 
-
 # ── Color palettes ────────────────────────────────────────────
 
 def _viridis_color(t: float, alpha: float = 0.7) -> ColorRGBA:
@@ -20,7 +19,6 @@ def _viridis_color(t: float, alpha: float = 0.7) -> ColorRGBA:
     g = max(0.0, min(1.0, 0.004 + 1.4 * t - 0.5 * t * t))
     b = max(0.0, min(1.0, 0.329 + 1.4 * t - 1.7 * t * t + 0.2 * t * t * t))
     return ColorRGBA(r=r, g=g, b=b, a=alpha)
-
 
 def _rank_color(rank: int, total: int, alpha: float = 0.5) -> ColorRGBA:
     """Color by rank: best = green, worst = red, middle = yellow."""
@@ -31,14 +29,11 @@ def _rank_color(rank: int, total: int, alpha: float = 0.5) -> ColorRGBA:
     g = min(1.0, 2.0 * (1.0 - t))
     return ColorRGBA(r=r, g=g, b=0.1, a=alpha)
 
-
 def _best_color(alpha: float = 1.0) -> ColorRGBA:
     return ColorRGBA(r=0.1, g=0.95, b=0.3, a=alpha)
 
-
 def _uncertainty_color(alpha: float = 0.15) -> ColorRGBA:
     return ColorRGBA(r=0.3, g=0.5, b=1.0, a=alpha)
-
 
 # ── Latent → 3D mapping ──────────────────────────────────────
 
@@ -74,7 +69,6 @@ def _latent_to_points(
         points.append(Point(x=x, y=y, z=z))
 
     return points
-
 
 class RolloutVisualizerNode(Node):
     """Publishes RViz markers for imagined trajectories."""
@@ -118,10 +112,6 @@ class RolloutVisualizerNode(Node):
         self._prev_marker_count = 0
 
         self.get_logger().info('RolloutVisualizerNode ready.')
-
-    # ══════════════════════════════════════════════════════════
-    # Main callback
-    # ══════════════════════════════════════════════════════════
 
     def _on_rollout_set(self, msg: RolloutSet):
         """Handle a new batch of imagined trajectories."""
@@ -298,10 +288,6 @@ class RolloutVisualizerNode(Node):
                 and best_idx < len(trajs)):
             self._publish_frames(trajs[best_idx], now)
 
-    # ══════════════════════════════════════════════════════════
-    # Uncertainty cones
-    # ══════════════════════════════════════════════════════════
-
     def _publish_uncertainty(
         self,
         trajs: List[RolloutTrajectory],
@@ -383,15 +369,12 @@ class RolloutVisualizerNode(Node):
 
         self.pub_uncertainty.publish(markers)
 
-    # ══════════════════════════════════════════════════════════
-    # Imagined frame publishing
-    # ══════════════════════════════════════════════════════════
-
     def _publish_frames(self, traj: RolloutTrajectory, stamp):
         """
         Publish the last decoded frame from the best rollout as a
         sensor_msgs/Image for display in RViz or rqt_image_view.
         """
+        print(traj)
         if not traj.predicted_frames:
             return
         if traj.frame_height == 0 or traj.frame_width == 0:
@@ -424,7 +407,6 @@ class RolloutVisualizerNode(Node):
 
         self.pub_frames.publish(msg)
 
-
 def main(args=None):
     rclpy.init(args=args)
     node = RolloutVisualizerNode()
@@ -435,7 +417,6 @@ def main(args=None):
     finally:
         node.destroy_node()
         rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main()
