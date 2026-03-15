@@ -1,0 +1,96 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    # ── Grid ──────────────────────────────────────────────────
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Plane Cell Count: 20
+      Cell Size: 0.1
+      Color: 80; 80; 80
+      Line Style:
+        Value: Lines
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Plane: XY
+      Reference Frame: wm_latent_space
+
+    # ── All candidate rollouts ────────────────────────────────
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Candidate Rollouts
+      Enabled: true
+      Topic:
+        Value: /wm/viz/rollouts
+        Depth: 5
+        Reliability Policy: Reliable
+
+    # ── Best rollout (highlighted) ────────────────────────────
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Best Rollout
+      Enabled: true
+      Topic:
+        Value: /wm/viz/best_rollout
+        Depth: 5
+        Reliability Policy: Reliable
+
+    # ── Uncertainty cones ─────────────────────────────────────
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Uncertainty
+      Enabled: true
+      Topic:
+        Value: /wm/viz/uncertainty
+        Depth: 5
+        Reliability Policy: Reliable
+
+    # ── Imagined frames ───────────────────────────────────────
+    - Class: rviz_default_plugins/Image
+      Name: Imagined Frames
+      Enabled: true
+      Topic:
+        Value: /wm/viz/imagined_frames
+        Depth: 5
+        Reliability Policy: Reliable
+      Max Value: 1
+      Min Value: 0
+      Normalize Range: true
+
+    # ── TF (static frame for latent space) ────────────────────
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: false
+
+  Global Options:
+    Background Color: 30; 30; 30
+    Fixed Frame: wm_latent_space
+    Frame Rate: 30
+
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 1.5
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05
+      Pitch: 0.5
+      Yaw: 0.8
+      Target Frame: wm_latent_space
+
+Window Geometry:
+  Width: 1400
+  Height: 900
+  Displays:
+    collapsed: false
+  Views:
+    collapsed: true

@@ -1,0 +1,75 @@
+# ═══════════════════════════════════════════════════════════════
+# wm_runtime configuration
+# ═══════════════════════════════════════════════════════════════
+# One file to configure all nodes. Launch with:
+#   ros2 launch wm_runtime imagination.launch.py
+#
+# Override any param at launch time:
+#   ros2 launch wm_runtime imagination.launch.py \
+#       device:=cuda:0 repo_id:=SaiResearch/sai_wm
+
+# ── Model Server ──────────────────────────────────────────────
+wm_model_server:
+  ros__parameters:
+    # HuggingFace model to load on startup (empty = wait for /wm/load_model)
+    repo_id: "SaiResearch/sai_wm"
+    subfolder: "iris/atari/alien"
+    device: "cpu"
+    trust_remote_code: false
+
+    # Status heartbeat rate (Hz). Set 0 to disable.
+    status_rate_hz: 1.0
+
+# ── Belief Publisher ──────────────────────────────────────────
+wm_belief_publisher:
+  ros__parameters:
+    # Observation mode: "dataset" | "image" | "vector"
+    #   dataset — samples from model's linked AutoDataset (no sensors needed)
+    #   image   — subscribes to image_topic
+    #   vector  — subscribes to vector_topic
+    obs_mode: "dataset"
+
+    # Sensor topics (used when obs_mode is "image" or "vector")
+    image_topic: "/camera/image_raw"
+    vector_topic: "/obs_vector"
+    joint_state_topic: "/joint_states"
+
+    # How fast to run forward() and publish belief (Hz)
+    publish_rate_hz: 10.0
+
+    # Dataset mode settings
+    dataset_seed: 42
+    dataset_advance: true    # increment seed each tick for variety
+
+    # Must match model_server params so belief_publisher loads the same model
+    repo_id: "SaiResearch/sai_wm"
+    subfolder: "iris/atari/alien"
+    device: "cpu"
+    trust_remote_code: false
+
+# ── Rollout Visualizer ────────────────────────────────────────
+wm_rollout_visualizer:
+  ros__parameters:
+    # RViz frame for all markers
+    frame_id: "wm_latent_space"
+
+    # Spatial scale: multiplied with latent values to get RViz coordinates.
+    # Increase for models with small latent values, decrease for large.
+    scale: 0.1
+
+    # Line widths (meters in RViz)
+    line_width: 0.005
+    best_line_width: 0.012
+    sphere_size: 0.015
+
+    # Which latent dimensions map to X, Y, Z
+    # Change these to explore different latent subspaces
+    latent_dims: [0, 1, 2]
+
+    # Display toggles
+    show_all_candidates: true
+    show_uncertainty: true
+    show_frames: true
+
+    # Cap on how many candidate trajectories to render (for performance)
+    max_display_candidates: 64
