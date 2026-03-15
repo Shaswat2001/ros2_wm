@@ -21,12 +21,15 @@ wm_model_server:
     status_rate_hz: 1.0
 
 # ── Belief Publisher ──────────────────────────────────────────
+# The belief publisher is a thin sensor bridge. It does NOT load
+# its own model — it calls the model_server's /wm/forward_observation
+# service. This means only one model copy lives in RAM.
 wm_belief_publisher:
   ros__parameters:
     # Observation mode: "dataset" | "image" | "vector"
-    #   dataset — samples from model's linked AutoDataset (no sensors needed)
-    #   image   — subscribes to image_topic
-    #   vector  — subscribes to vector_topic
+    #   dataset — model_server samples from its linked AutoDataset
+    #   image   — subscribes to image_topic, sends pixels to model_server
+    #   vector  — subscribes to vector_topic, sends vectors to model_server
     obs_mode: "dataset"
 
     # Sensor topics (used when obs_mode is "image" or "vector")
@@ -34,18 +37,12 @@ wm_belief_publisher:
     vector_topic: "/obs_vector"
     joint_state_topic: "/joint_states"
 
-    # How fast to run forward() and publish belief (Hz)
+    # How fast to send observations to model_server (Hz)
     publish_rate_hz: 10.0
 
     # Dataset mode settings
     dataset_seed: 42
     dataset_advance: true    # increment seed each tick for variety
-
-    # Must match model_server params so belief_publisher loads the same model
-    repo_id: "SaiResearch/sai_wm"
-    subfolder: "iris/atari/alien"
-    device: "cpu"
-    trust_remote_code: false
 
 # ── Rollout Visualizer ────────────────────────────────────────
 wm_rollout_visualizer:

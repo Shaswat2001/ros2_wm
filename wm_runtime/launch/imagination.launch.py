@@ -5,7 +5,6 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
-
 def generate_launch_description():
 
     pkg_share = FindPackageShare('wm_runtime')
@@ -63,10 +62,6 @@ def generate_launch_description():
                 'obs_mode': LaunchConfiguration('obs_mode'),
                 'image_topic': LaunchConfiguration('image_topic'),
                 'publish_rate_hz': LaunchConfiguration('publish_rate_hz'),
-                'repo_id': LaunchConfiguration('repo_id'),
-                'subfolder': LaunchConfiguration('subfolder'),
-                'device': LaunchConfiguration('device'),
-                'trust_remote_code': LaunchConfiguration('trust_remote_code'),
             },
         ],
         output='screen',

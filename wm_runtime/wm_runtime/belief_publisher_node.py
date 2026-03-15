@@ -1,25 +1,37 @@
-import time
-import threading
 from typing import Optional
 
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 
 from std_msgs.msg import Float32MultiArray
 from sensor_msgs.msg import Image, JointState
 
-from wm_interfaces.msg import BeliefState, WorldModelObservation
+from wm_interfaces.msg import BeliefState, ModelStatus, WorldModelObservation
+from wm_interfaces.srv import ForwardObservation
 
 class BeliefPublisherNode(Node):
     """
-    Assembles observations from sensor topics and publishes belief states.
+    Sensor bridge: assembles observations and delegates forward() to
+    the model_server_node via the /wm/forward_observation service.
+
+    This node does NOT load its own world model — the model_server
+    is the single owner of the model instance.  This avoids the
+    duplicate-model-in-RAM problem.
+
+    Supported observation modes:
+      - 'dataset'  — model_server samples from its loaded dataset
+                     (no sensors needed; good for demos)
+      - 'image'    — subscribes to an image topic
+      - 'vector'   — subscribes to a Float32MultiArray topic
     """
 
     def __init__(self):
         super().__init__('wm_belief_publisher')
 
+        # ── Parameters ────────────────────────────────────────
         self.declare_parameter('obs_mode', 'dataset')      # image | vector | dataset
         self.declare_parameter('image_topic', '/camera/image_raw')
         self.declare_parameter('vector_topic', '/obs_vector')
@@ -28,23 +40,42 @@ class BeliefPublisherNode(Node):
         self.declare_parameter('dataset_seed', 42)
         self.declare_parameter('dataset_advance', True)     # step seed each tick
 
-        self._wm = None
-        self._dataset = None
-        self._lock = threading.Lock()
-
+        # ── Sensor state ──────────────────────────────────────
         self._latest_image: Optional[np.ndarray] = None
         self._latest_vector: Optional[np.ndarray] = None
         self._latest_joint_state: Optional[JointState] = None
         self._dataset_seed_counter = self.get_parameter('dataset_seed').value
         self._forward_count = 0
 
-        self.pub_belief = self.create_publisher(BeliefState, '/wm/belief_state', 10)
-        self.pub_obs = self.create_publisher(WorldModelObservation, '/wm/observation', 10)
+        # ── Track model_server readiness ──────────────────────
+        self._model_server_ready = False
 
+        # ── Callback group for async service calls ────────────
+        self._cb_group = ReentrantCallbackGroup()
+
+        # ── Service client (replaces local model loading) ─────
+        self._forward_client = self.create_client(
+            ForwardObservation,
+            '/wm/forward_observation',
+            callback_group=self._cb_group,
+        )
+
+        # ── Publishers ────────────────────────────────────────
+        self.pub_obs = self.create_publisher(
+            WorldModelObservation, '/wm/observation', 10,
+        )
+
+        # ── Subscriber: model server status ───────────────────
+        self.create_subscription(
+            ModelStatus, '/wm/status',
+            self._on_model_status, 10,
+        )
+
+        # ── Sensor subscriptions ──────────────────────────────
         obs_mode = self.get_parameter('obs_mode').value
         best_effort = QoSProfile(
             depth=1,
-            reliability=ReliabilityPolicy.BEST_EFFORT
+            reliability=ReliabilityPolicy.BEST_EFFORT,
         )
 
         if obs_mode == 'image':
@@ -63,8 +94,8 @@ class BeliefPublisherNode(Node):
 
         elif obs_mode == 'dataset':
             self.get_logger().info(
-                'Running in dataset mode — no sensor subscription. '
-                'Will sample from the model\'s linked dataset.'
+                'Running in dataset mode — the model_server will '
+                'sample from its loaded dataset on each forward call.'
             )
         else:
             self.get_logger().error(f'Unknown obs_mode: {obs_mode}')
@@ -80,7 +111,8 @@ class BeliefPublisherNode(Node):
         self.create_timer(1.0 / rate, self._tick)
 
         self.get_logger().info(
-            f'BeliefPublisherNode ready (mode={obs_mode}, rate={rate}Hz).'
+            f'BeliefPublisherNode ready (mode={obs_mode}, rate={rate}Hz). '
+            f'Waiting for model_server...'
         )
 
     def _on_image(self, msg: Image):
@@ -101,7 +133,6 @@ class BeliefPublisherNode(Node):
             if encoding == 'bgra8':
                 img = img[:, :, ::-1]
         else:
-            # Fallback: try to reshape as-is
             img = raw.reshape(h, w, -1) if len(raw) > h * w else raw.reshape(h, w)
 
         self._latest_image = img
@@ -114,62 +145,96 @@ class BeliefPublisherNode(Node):
         """Store latest joint state."""
         self._latest_joint_state = msg
 
+    def _on_model_status(self, msg: ModelStatus):
+        """Track whether the model server has a model loaded."""
+        was_ready = self._model_server_ready
+        self._model_server_ready = msg.ready
+
+        if msg.ready and not was_ready:
+            self.get_logger().info(
+                f'Model server ready: {msg.model_type}/{msg.environment} '
+                f'on {msg.device}'
+            )
+
     def _tick(self):
-        """Called at publish_rate_hz. Assembles obs, runs forward(), publishes belief"""
-        # Lazy-connect to the world model on the model server
-        if self._wm is None:
-            self._connect_to_model()
-            if self._wm is None:
-                return
-        
-        obs = self._assemble_observation()
-        if obs is None:
+        """Called at publish_rate_hz. Assembles obs, sends to model_server."""
+        # Wait until model_server has a model loaded
+        if not self._model_server_ready:
             return
-        
-        with self._lock:
-            try:
-                t0 = time.perf_counter()
 
-                seed = self._dataset_seed_counter
-                self._wm.reset(seed=seed)
-                state = self._wm.forward(obs)
+        # Wait until the service is available (non-blocking check)
+        if not self._forward_client.service_is_ready():
+            return
 
-                elapsed_ms = (time.perf_counter() - t0) * 1000.0
-                self._forward_count += 1
+        obs_mode = self.get_parameter('obs_mode').value
 
-                belief_msg = BeliefState()
-                belief_msg.header.stamp = self.get_clock().now().to_msg()
-                latent = state['latent_state']
-                belief_msg.latent = latent.flatten().astype(np.float32).tolist()
-                belief_msg.latent_shape = list(latent.shape)
-                belief_msg.seed = seed
-                belief_msg.model_id = self._get_model_id()
-                self.pub_belief.publish(belief_msg)
+        # ── Dataset mode: model_server owns the dataset too,
+        #    so we just send a seed and an empty obs array.
+        #    The model_server's _forward_observation will use
+        #    its own dataset to sample the obs.
+        # ── Sensor modes: we send real sensor data.
+        obs = self._assemble_observation()
 
-                if self._forward_count % 100 == 0:
-                    self.get_logger().info(
-                        f'forward() #{self._forward_count} — {elapsed_ms:.1f}ms'
-                    )
+        # In dataset mode we always have something to send (the seed).
+        # In sensor modes, obs may be None if no data has arrived yet.
+        if obs is None and obs_mode != 'dataset':
+            return
 
-            except Exception as e:
-                self.get_logger().error(f'forward() failed: {e}')
+        # Build the service request
+        request = ForwardObservation.Request()
+        request.seed = self._dataset_seed_counter
+
+        if obs is not None:
+            request.obs_data = obs.flatten().astype(np.float32).tolist()
+            request.obs_shape = list(obs.shape)
+        else:
+            # Dataset mode with no local obs — send empty arrays.
+            # The model_server will sample from its dataset using the seed.
+            request.obs_data = []
+            request.obs_shape = []
+
+        # Async call — fire and process result in callback
+        future = self._forward_client.call_async(request)
+        future.add_done_callback(self._on_forward_response)
 
         # Advance dataset seed for next tick
-        if (self.get_parameter('obs_mode').value == 'dataset'
+        if (obs_mode == 'dataset'
                 and self.get_parameter('dataset_advance').value):
             self._dataset_seed_counter += 1
-    
+
+    def _on_forward_response(self, future):
+        """Handle the ForwardObservation service response."""
+        try:
+            response = future.result()
+            if not response.success:
+                self.get_logger().warn(
+                    f'Forward failed: {response.message}'
+                )
+                return
+
+            self._forward_count += 1
+
+            if self._forward_count % 100 == 0:
+                self.get_logger().info(
+                    f'forward() #{self._forward_count} via model_server'
+                )
+
+        except Exception as e:
+            self.get_logger().error(f'Forward service call failed: {e}')
+
     def _assemble_observation(self) -> Optional[np.ndarray]:
         """
-        Build the numpy observation array from the latest sensor data
-        or from the dataset, depending on obs_mode.
+        Build the numpy observation array from the latest sensor data.
+        Returns None if no data is available yet.
+
+        In dataset mode, returns None — the model_server handles
+        dataset sampling internally.
         """
         obs_mode = self.get_parameter('obs_mode').value
 
         if obs_mode == 'dataset':
-            if self._dataset is None:
-                return None
-            return self._dataset.sample(seed=self._dataset_seed_counter)
+            # The model_server owns the dataset; nothing to assemble.
+            return None
 
         elif obs_mode == 'image':
             if self._latest_image is None:
@@ -183,95 +248,19 @@ class BeliefPublisherNode(Node):
 
         return None
 
-    def _connect_to_model(self):
-        """
-        Get a reference to the world model loaded by model_server_node.
-
-        Strategy: import worldmodel_hub and try to access the model
-        through a shared-memory approach. For now, we use a simple
-        ROS service check — if the model server is running and has a
-        model loaded, we load our own copy.
-
-        NOTE: In a production system, the model would live in shared
-        memory or a separate process with IPC. For the MVP, each node
-        that needs the model loads its own copy via the same params.
-        The model_server handles services; this node handles the
-        continuous belief publishing loop.
-        """
-        try:
-            from worldmodel_hub import AutoWorldModel
-
-            # Check if model_server has advertised /wm/status
-            # If so, we know the repo_id and can load our own copy
-            topic_names = [name for name, _ in self.get_topic_names_and_types()]
-
-            if '/wm/status' not in topic_names:
-                return  # Model server not up yet
-
-            # For MVP: read the same params as model_server
-            # In practice these would come from a shared config
-            repo_id = self.get_parameter('repo_id').value if self.has_parameter('repo_id') else ''
-            if not repo_id:
-                # Try to discover from model_server's status
-                # For now, declare these params so the launch file can set them
-                self.declare_parameter('repo_id', '')
-                self.declare_parameter('subfolder', '')
-                self.declare_parameter('device', 'cpu')
-                self.declare_parameter('trust_remote_code', False)
-                repo_id = self.get_parameter('repo_id').value
-
-            if not repo_id:
-                return
-
-            subfolder = self.get_parameter('subfolder').value or None
-            device = self.get_parameter('device').value
-
-            self.get_logger().info(f'Loading model: {repo_id} / {subfolder}')
-            self._wm = AutoWorldModel.from_pretrained(
-                repo_id=repo_id,
-                subfolder=subfolder,
-                device=device,
-                trust_remote_code=self.get_parameter('trust_remote_code').value,
-            )
-
-            # Load dataset if available
-            try:
-                self._dataset = self._wm.load_dataset()
-                self.get_logger().info('Dataset loaded for belief publisher.')
-            except Exception:
-                self._dataset = None
-
-            self.get_logger().info('Belief publisher connected to world model.')
-
-        except ImportError:
-            self.get_logger().warn(
-                'worldmodel_hub not installed. '
-                'Belief publisher will retry on next tick.'
-            )
-        except Exception as e:
-            self.get_logger().warn(f'Model connection failed: {e}')
-
-    def _get_model_id(self) -> str:
-        """Extract model_id string from loaded model."""
-        if self._wm is None:
-            return ''
-        if hasattr(self._wm, 'world_spec') and self._wm.world_spec is not None:
-            spec = self._wm.world_spec
-            return f'{spec.model_type}/{spec.env}'
-        return 'unknown'
-
 def main(args=None):
     rclpy.init(args=args)
     node = BeliefPublisherNode()
+    executor = rclpy.executors.MultiThreadedExecutor()
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
         node.destroy_node()
         rclpy.shutdown()
 
+
 if __name__ == '__main__':
     main()
-
-

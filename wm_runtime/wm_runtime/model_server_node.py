@@ -17,8 +17,10 @@ from wm_interfaces.msg import (
 )
 
 from wm_interfaces.srv import (
+    ForwardObservation,
     Imagine, 
     LoadModel,
+    PlanAction,
     WhatIf
 )
 
@@ -67,6 +69,16 @@ class ModelServerNode(Node):
         self.srv_what_if = self.create_service(
             WhatIf, '/wm/what_if',
             self._handle_what_if,
+            callback_group=self._cb_group,
+        )
+        self.srv_forward = self.create_service(
+            ForwardObservation, '/wm/forward_observation',
+            self._handle_forward_observation,
+            callback_group=self._cb_group,
+        )
+        self.srv_plan = self.create_service(
+            PlanAction, '/wm/plan_action',
+            self._handle_plan_action,
             callback_group=self._cb_group,
         )
 
@@ -225,7 +237,402 @@ class ModelServerNode(Node):
 
         return response
 
+    def _handle_forward_observation(self, request, response):
+        """
+        ForwardObservation.srv handler — encodes an observation via
+        wm.reset() + wm.forward(obs) and returns the belief state.
+
+        This is the single-model-copy path: the belief_publisher_node
+        sends sensor observations here instead of loading its own model.
+        """
+        if self._wm is None:
+            response.success = False
+            response.message = 'No model loaded. Call /wm/load_model first.'
+            return response
+
+        try:
+            seed = request.seed
+
+            # If obs_data is empty, the caller is in dataset mode —
+            # sample an observation from the model's linked dataset.
+            if len(request.obs_data) == 0:
+                if self._dataset is None:
+                    response.success = False
+                    response.message = (
+                        'Empty observation and no dataset loaded. '
+                        'Either send observation data or load a model '
+                        'with an associated dataset.'
+                    )
+                    return response
+                obs = self._dataset.sample(seed=seed)
+            else:
+                # Reconstruct the numpy observation from flat data + shape
+                obs_data = np.array(request.obs_data, dtype=np.float32)
+                obs_shape = tuple(request.obs_shape)
+                if obs_shape:
+                    obs = obs_data.reshape(obs_shape)
+                else:
+                    obs = obs_data
+
+            with self._model_lock:
+                state = self._forward_observation(obs, seed=seed)
+
+            # Build belief response (forward_observation already published
+            # to /wm/belief_state, but we also return it in the response
+            # so the caller doesn't need to race on the topic)
+            belief_msg = BeliefState()
+            belief_msg.header.stamp = self.get_clock().now().to_msg()
+            latent = state['latent_state']
+            belief_msg.latent = latent.flatten().astype(np.float32).tolist()
+            belief_msg.latent_shape = list(latent.shape)
+            belief_msg.seed = seed
+            belief_msg.model_id = self._model_id
+
+            response.belief = belief_msg
+            response.success = True
+            response.message = 'Forward pass complete.'
+
+        except Exception as e:
+            response.success = False
+            response.message = f'Forward failed: {e}'
+            self.get_logger().error(
+                f'ForwardObservation failed:\n{traceback.format_exc()}'
+            )
+
+        return response
+
+    def _handle_plan_action(self, request, response):
+        """
+        PlanAction.srv handler — the "easy mode" planning API.
+
+        Given a raw observation:
+          1. Run forward() to get the belief state
+          2. Sample candidate action sequences (random / CEM / MPPI)
+          3. Roll out each candidate through predict()
+          4. Return the best first action + all rollouts
+
+        For fine-grained control, callers should use Imagine.srv instead.
+        """
+        if self._wm is None:
+            response.success = False
+            response.message = 'No model loaded. Call /wm/load_model first.'
+            return response
+
+        try:
+            seed = request.seed
+            horizon = request.horizon or 10
+            num_candidates = request.num_candidates or 16
+            method = request.sampling_method or 'random'
+
+            # ── 1. Extract observation from the request ───────
+            obs = self._extract_obs_from_request(request.observation, seed)
+            if obs is None:
+                response.success = False
+                response.message = (
+                    'Could not extract observation. Send obs_vector in '
+                    'the WorldModelObservation, or ensure a dataset is loaded.'
+                )
+                return response
+
+            # ── 2. Forward pass to get belief ─────────────────
+            with self._model_lock:
+                state = self._forward_observation(obs, seed=seed)
+
+            belief_msg = BeliefState()
+            belief_msg.header.stamp = self.get_clock().now().to_msg()
+            latent = state['latent_state']
+            belief_msg.latent = latent.flatten().astype(np.float32).tolist()
+            belief_msg.latent_shape = list(latent.shape)
+            belief_msg.seed = seed
+            belief_msg.model_id = self._model_id
+
+            # ── 3. Sample candidate action sequences ──────────
+            candidates = self._sample_candidates(
+                num_candidates=num_candidates,
+                horizon=horizon,
+                method=method,
+                seed=seed,
+            )
+
+            # ── 4. Roll out each candidate ────────────────────
+            trajectories = []
+            best_reward = float('-inf')
+            best_idx = 0
+
+            with self._model_lock:
+                for i, candidate in enumerate(candidates):
+                    # Re-forward before each rollout to reset state
+                    self._forward_observation(obs, seed=seed)
+
+                    traj = self._rollout_candidate(
+                        belief_latent=latent.flatten().astype(np.float32),
+                        candidate=candidate,
+                        horizon=horizon,
+                        seed=seed,
+                        record_observations=False,
+                    )
+                    trajectories.append(traj)
+
+                    if traj.total_reward > best_reward:
+                        best_reward = traj.total_reward
+                        best_idx = i
+
+            self._total_rollouts += len(trajectories)
+
+            # ── 5. CEM refinement (if requested) ─────────────
+            if method == 'cem' and len(trajectories) > 0:
+                trajectories, best_idx = self._cem_refine(
+                    obs=obs,
+                    seed=seed,
+                    horizon=horizon,
+                    initial_trajectories=trajectories,
+                    initial_candidates=candidates,
+                    num_iterations=3,
+                    elite_fraction=0.2,
+                )
+
+            # ── 6. Extract best first action ──────────────────
+            best_traj = trajectories[best_idx]
+            best_candidate = candidates[best_idx] if best_idx < len(candidates) else candidates[0]
+
+            # The first action from the best candidate
+            action_dim = best_candidate.action_dim or 1
+            raw_actions = np.array(best_candidate.actions, dtype=np.float32)
+            if action_dim > 1:
+                best_first_action = raw_actions[:action_dim].tolist()
+            else:
+                best_first_action = [float(raw_actions[0])]
+
+            # ── 7. Build response ─────────────────────────────
+            response.best_action = best_first_action
+            response.best_rollout = best_traj
+
+            rollout_set = RolloutSet()
+            rollout_set.header.stamp = self.get_clock().now().to_msg()
+            rollout_set.trajectories = trajectories
+            rollout_set.best_index = best_idx
+            rollout_set.belief = belief_msg
+            response.all_rollouts = rollout_set
+
+            response.success = True
+            response.message = (
+                f'Planned with {len(trajectories)} candidates '
+                f'({method}), best reward={best_reward:.3f}'
+            )
+
+            # Also publish for the visualizer
+            self._publish_rollout_set(
+                trajectories=trajectories,
+                best_index=best_idx,
+                belief=belief_msg,
+            )
+
+        except Exception as e:
+            response.success = False
+            response.message = f'Planning failed: {e}'
+            self.get_logger().error(
+                f'PlanAction failed:\n{traceback.format_exc()}'
+            )
+
+        return response
+
     # Core worldmodel_hub bridge methods
+
+    def _extract_obs_from_request(
+        self, obs_msg, seed: int,
+    ) -> Optional[np.ndarray]:
+        """
+        Extract a numpy observation from a WorldModelObservation message.
+
+        Priority: obs_vector > image > dataset sample.
+        """
+        # 1. Flat vector (most common for Atari / MuJoCo)
+        if len(obs_msg.obs_vector) > 0:
+            obs = np.array(obs_msg.obs_vector, dtype=np.float32)
+            if len(obs_msg.obs_shape) > 0:
+                obs = obs.reshape(tuple(obs_msg.obs_shape))
+            return obs
+
+        # 2. Image
+        if obs_msg.image.height > 0 and obs_msg.image.width > 0:
+            h, w = obs_msg.image.height, obs_msg.image.width
+            raw = np.frombuffer(obs_msg.image.data, dtype=np.uint8)
+            encoding = obs_msg.image.encoding
+            if encoding in ('rgb8', 'bgr8'):
+                img = raw.reshape(h, w, 3)
+                if encoding == 'bgr8':
+                    img = img[:, :, ::-1]
+            elif encoding == 'mono8':
+                img = raw.reshape(h, w)
+            else:
+                img = raw.reshape(h, w, -1) if len(raw) > h * w else raw.reshape(h, w)
+            return img.astype(np.float32)
+
+        # 3. Fall back to dataset
+        if self._dataset is not None:
+            return self._dataset.sample(seed=seed)
+
+        return None
+
+    def _sample_candidates(
+        self,
+        num_candidates: int,
+        horizon: int,
+        method: str,
+        seed: int,
+    ) -> list:
+        """
+        Generate candidate ActionSequence messages for planning.
+
+        Supports:
+          - 'random': uniform random actions from the action space
+          - 'cem':    initial population for cross-entropy method
+                      (same as random; refinement happens after rollout)
+          - 'mppi':   Gaussian-perturbed actions around zero mean
+        """
+        rng = np.random.default_rng(seed)
+
+        # Detect action space from dataset config
+        is_discrete = False
+        num_actions = 4   # default for Atari
+        action_dim = 1
+        action_low = -1.0
+        action_high = 1.0
+
+        if self._dataset is not None:
+            try:
+                act_space = self._dataset.action_space
+                if hasattr(act_space, 'n'):
+                    is_discrete = True
+                    num_actions = act_space.n
+                    action_dim = 1
+                else:
+                    is_discrete = False
+                    action_dim = act_space.shape[0] if act_space.shape else 1
+                    action_low = float(act_space.low.flat[0])
+                    action_high = float(act_space.high.flat[0])
+            except Exception:
+                pass
+
+        candidates = []
+        for i in range(num_candidates):
+            msg = ActionSequence()
+            msg.horizon = horizon
+            msg.action_dim = action_dim
+            msg.action_space = 'discrete' if is_discrete else 'continuous'
+            msg.label = f'{method}_{i}'
+
+            if is_discrete:
+                actions = rng.integers(0, num_actions, size=horizon)
+                msg.actions = actions.astype(np.float32).tolist()
+            elif method == 'mppi':
+                # MPPI: Gaussian noise around zero
+                noise_std = (action_high - action_low) * 0.3
+                actions = rng.normal(0.0, noise_std, size=(horizon, action_dim))
+                actions = np.clip(actions, action_low, action_high)
+                msg.actions = actions.flatten().astype(np.float32).tolist()
+            else:
+                # Random / CEM initial population: uniform
+                actions = rng.uniform(
+                    action_low, action_high,
+                    size=(horizon, action_dim),
+                )
+                msg.actions = actions.flatten().astype(np.float32).tolist()
+
+            candidates.append(msg)
+
+        return candidates
+
+    def _cem_refine(
+        self,
+        obs: np.ndarray,
+        seed: int,
+        horizon: int,
+        initial_trajectories: list,
+        initial_candidates: list,
+        num_iterations: int = 3,
+        elite_fraction: float = 0.2,
+    ) -> tuple:
+        """
+        Cross-entropy method refinement: take the top-k candidates,
+        fit a Gaussian to their actions, resample, and re-rollout.
+
+        Returns (trajectories, best_idx) after refinement.
+        """
+        rng = np.random.default_rng(seed + 1000)
+        trajectories = list(initial_trajectories)
+        candidates = list(initial_candidates)
+
+        num_elite = max(2, int(len(candidates) * elite_fraction))
+        num_candidates = len(candidates)
+
+        # Detect action space params from first candidate
+        action_dim = candidates[0].action_dim or 1
+        is_discrete = (candidates[0].action_space == 'discrete')
+
+        # CEM doesn't apply well to discrete spaces — skip refinement
+        if is_discrete:
+            rewards = [t.total_reward for t in trajectories]
+            return trajectories, int(np.argmax(rewards))
+
+        for cem_iter in range(num_iterations):
+            # Rank by reward
+            rewards = np.array([t.total_reward for t in trajectories])
+            elite_indices = np.argsort(rewards)[-num_elite:]
+
+            # Collect elite action matrices
+            elite_actions = []
+            for idx in elite_indices:
+                c = candidates[idx]
+                a = np.array(c.actions, dtype=np.float32)
+                if action_dim > 1:
+                    a = a.reshape(horizon, action_dim)
+                else:
+                    a = a[:horizon].reshape(horizon, 1)
+                elite_actions.append(a)
+
+            elite_stack = np.stack(elite_actions, axis=0)  # (num_elite, H, D)
+            mean = elite_stack.mean(axis=0)                # (H, D)
+            std = elite_stack.std(axis=0) + 1e-6           # (H, D)
+
+            # Resample from fitted Gaussian
+            new_candidates = []
+            for i in range(num_candidates):
+                noise = rng.normal(0.0, 1.0, size=(horizon, action_dim))
+                actions = mean + std * noise
+                # Keep elites as-is for the first few slots
+                if i < num_elite:
+                    actions = elite_actions[i]
+
+                msg = ActionSequence()
+                msg.horizon = horizon
+                msg.action_dim = action_dim
+                msg.action_space = 'continuous'
+                msg.label = f'cem_{cem_iter}_{i}'
+                msg.actions = actions.flatten().astype(np.float32).tolist()
+                new_candidates.append(msg)
+
+            # Re-rollout
+            new_trajectories = []
+            with self._model_lock:
+                for candidate in new_candidates:
+                    self._forward_observation(obs, seed=seed)
+                    traj = self._rollout_candidate(
+                        belief_latent=np.zeros(1),  # not used, belief is set by forward
+                        candidate=candidate,
+                        horizon=horizon,
+                        seed=seed,
+                        record_observations=False,
+                    )
+                    new_trajectories.append(traj)
+
+            self._total_rollouts += len(new_trajectories)
+            trajectories = new_trajectories
+            candidates = new_candidates
+
+        rewards = [t.total_reward for t in trajectories]
+        best_idx = int(np.argmax(rewards))
+        return trajectories, best_idx
 
     def _load_model(self, repo_id, subfolder, device, trust_remote_code):
         """
