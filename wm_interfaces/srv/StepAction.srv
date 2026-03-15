@@ -1,0 +1,37 @@
+# StepAction.srv
+# Step the world model forward by one action via wm.predict(action).
+# Returns the next belief state, reconstructed observation, reward,
+# and termination flag.
+#
+# Must be called after ForwardObservation (which initializes the model
+# state). Calling StepAction without a prior forward is an error.
+
+# ── Request ───────────────────────────────────────────────────
+
+# The action to take. For discrete spaces: single float cast from int.
+# For continuous spaces: the full action vector.
+float32[] action
+
+# "discrete" or "continuous"
+string action_space
+
+---
+# ── Response ──────────────────────────────────────────────────
+
+# Updated belief state after the step
+wm_interfaces/BeliefState belief
+
+# Predicted reward for this step
+float32 reward
+
+# Whether the episode terminated
+bool terminated
+
+# Reconstructed observation frame (flattened uint8 pixels)
+uint8[] recon_data
+uint32 recon_height
+uint32 recon_width
+uint32 recon_channels
+
+bool success
+string message

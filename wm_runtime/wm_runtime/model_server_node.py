@@ -25,6 +25,7 @@ from wm_interfaces.srv import (
     Imagine,
     LoadModel,
     PlanAction,
+    StepAction,
     WhatIf,
 )
 
@@ -89,6 +90,11 @@ class ModelServerNode(Node):
         self.srv_plan = self.create_service(
             PlanAction, '/wm/plan_action',
             self._handle_plan_action,
+            callback_group=self._cb_group,
+        )
+        self.srv_step = self.create_service(
+            StepAction, '/wm/step_action',
+            self._handle_step_action,
             callback_group=self._cb_group,
         )
 
@@ -407,6 +413,108 @@ class ModelServerNode(Node):
             )
         return response
 
+    def _handle_step_action(self, request, response):
+        """
+        StepAction.srv handler — wraps wm.predict(action).
+
+        Steps the world model forward by one action. If the model state
+        hasn't been initialized yet (no prior forward() call), this will
+        auto-initialize from the dataset if available.
+        """
+        if self._wm is None:
+            response.success = False
+            response.message = 'No model loaded. Call /wm/load_model first.'
+            return response
+
+        try:
+            # Auto-initialize if no belief state exists
+            if self._current_belief is None:
+                if self._dataset is not None:
+                    self.get_logger().info(
+                        'No model state — auto-initializing from dataset.'
+                    )
+                    with self._model_lock:
+                        obs = self._dataset.sample(seed=42)
+                        self._forward_observation(obs, seed=42)
+                else:
+                    response.success = False
+                    response.message = (
+                        'No model state and no dataset. '
+                        'Call /wm/forward_observation first.'
+                    )
+                    return response
+            is_discrete = (request.action_space == 'discrete')
+            raw_action = np.array(request.action, dtype=np.float32)
+
+            if is_discrete:
+                action = int(raw_action[0])
+            elif len(raw_action) == 1:
+                action = float(raw_action[0])
+            else:
+                action = raw_action
+
+            with self._model_lock:
+                t0 = time.perf_counter()
+                output = self._wm.predict(action)
+                elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                self._total_predictions += 1
+
+                if self._total_predictions > 0:
+                    self._avg_predict_ms = (
+                        0.9 * self._avg_predict_ms + 0.1 * elapsed_ms
+                    )
+
+                # Update internal belief state
+                self._current_belief = output
+
+            # Build belief message
+            belief_msg = self._state_to_belief_msg(output, seed=0)
+            self.pub_belief.publish(belief_msg)
+
+            response.belief = belief_msg
+            response.reward = float(output.get('reward', 0.0) or 0.0)
+            response.terminated = bool(output.get('terminated', False))
+
+            # Pack reconstructed frame if available
+            recon = output.get('recon')
+            if recon is not None:
+                frame = np.asarray(recon)
+                # CHW → HWC
+                if frame.ndim == 3 and frame.shape[0] in (1, 3, 4):
+                    frame = np.transpose(frame, (1, 2, 0))
+                # Normalize to uint8
+                if frame.dtype != np.uint8:
+                    if frame.max() <= 1.0:
+                        frame = (frame * 255.0).clip(0, 255)
+                    frame = frame.astype(np.uint8)
+                frame = np.ascontiguousarray(frame)
+
+                response.recon_height = frame.shape[0]
+                response.recon_width = frame.shape[1]
+                response.recon_channels = frame.shape[2] if frame.ndim == 3 else 1
+                response.recon_data = frame.tobytes()
+
+                # Also publish to the forward_frames topic
+                self._publish_frame(recon)
+            else:
+                response.recon_height = 0
+                response.recon_width = 0
+                response.recon_channels = 0
+
+            response.success = True
+            response.message = (
+                f'Step complete: reward={response.reward:.3f}, '
+                f'terminated={response.terminated}'
+            )
+
+        except Exception as e:
+            response.success = False
+            response.message = f'Step failed: {e}'
+            self.get_logger().error(
+                f'StepAction failed:\n{traceback.format_exc()}'
+            )
+        return response
+
     def _extract_obs_from_request(self, obs_msg, seed: int) -> Optional[np.ndarray]:
         """Extract numpy observation from WorldModelObservation. Priority: vector > image > dataset."""
         if len(obs_msg.obs_vector) > 0:
@@ -584,7 +692,7 @@ class ModelServerNode(Node):
             self.get_logger().info('No associated dataset (this is fine).')
 
     def _forward_observation(self, obs: np.ndarray, seed: int = 42):
-        """Run wm.reset() + wm.forward(obs), publish belief + recon frame. Lock must be held."""
+        """Run wm.reset() + wm.forward(obs), publish belief + input frame. Lock must be held."""
         t0 = time.perf_counter()
         self._wm.reset(seed=seed)
         state = self._wm.forward(obs)
@@ -594,7 +702,24 @@ class ModelServerNode(Node):
 
         msg = self._state_to_belief_msg(state, seed)
         self.pub_belief.publish(msg)
-        self._publish_recon(state)
+
+        # Publish the frame: prefer the model's reconstruction if available,
+        # otherwise publish the raw input observation (IRIS's forward() does
+        # not produce a 'recon' key — only predict() does).
+        recon = state.get('recon')
+        if recon is not None:
+            self.get_logger().debug(
+                f'forward() returned recon: type={type(recon).__name__}, '
+                f'shape={np.asarray(recon).shape}, dtype={np.asarray(recon).dtype}'
+            )
+            self._publish_frame(recon)
+        else:
+            self.get_logger().debug(
+                f'forward() has no recon, publishing input obs: '
+                f'shape={obs.shape}, dtype={obs.dtype}'
+            )
+            self._publish_frame(obs)
+
         return state
 
     def _rollout_candidate(self, belief_latent, candidate, horizon, seed,
@@ -734,20 +859,35 @@ class ModelServerNode(Node):
         tf.transform.rotation.w = 1.0
         self._tf_broadcaster.sendTransform(tf)
 
-    def _publish_recon(self, state: dict):
-        """Publish decoded forward() frame to /wm/viz/forward_frames."""
-        print(state)
-        recon = state.get('recon')
-        if recon is None:
+    def _publish_frame(self, frame_data):
+        """
+        Publish an observation or reconstruction image to /wm/viz/forward_frames.
+
+        Accepts raw numpy arrays from either the input observation (during
+        forward()) or the decoded reconstruction (from predict()). Handles
+        CHW→HWC, float→uint8, grayscale/RGB detection.
+        """
+        if frame_data is None:
+            self.get_logger().warn('_publish_frame called with None')
             return
 
-        frame = np.asarray(recon)
+        frame = np.asarray(frame_data, dtype=np.float64)
+
+        self.get_logger().debug(
+            f'_publish_frame: input shape={frame.shape}, '
+            f'dtype={frame.dtype}, min={frame.min():.3f}, max={frame.max():.3f}'
+        )
+
+        # CHW → HWC
         if frame.ndim == 3 and frame.shape[0] in (1, 3, 4):
             frame = np.transpose(frame, (1, 2, 0))
-        if frame.dtype != np.uint8:
-            if frame.max() <= 1.0:
-                frame = (frame * 255.0).clip(0, 255)
-            frame = frame.astype(np.uint8)
+
+        # Normalize to uint8
+        if frame.max() <= 1.0 and frame.min() >= 0.0:
+            frame = (frame * 255.0).clip(0, 255).astype(np.uint8)
+        elif frame.dtype != np.uint8:
+            frame = frame.clip(0, 255).astype(np.uint8)
+
         frame = np.ascontiguousarray(frame)
 
         msg = Image()
@@ -767,13 +907,20 @@ class ModelServerNode(Node):
             msg.step = frame.shape[1]
         msg.is_bigendian = False
         msg.data = frame.tobytes()
+
+        self.get_logger().info(
+            f'Publishing frame: {msg.width}x{msg.height} {msg.encoding} '
+            f'({len(msg.data)} bytes) to /wm/viz/forward_frames'
+        )
         self.pub_forward_frames.publish(msg)
 
 def main(args=None):
     rclpy.init(args=args)
     node = ModelServerNode()
+    executor = rclpy.executors.MultiThreadedExecutor()
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:

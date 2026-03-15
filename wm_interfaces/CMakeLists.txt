@@ -29,6 +29,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/ForwardObservation.srv"
   "srv/Imagine.srv"
   "srv/PlanAction.srv"
+  "srv/StepAction.srv"
   "srv/WhatIf.srv"
   "srv/LoadModel.srv"
 

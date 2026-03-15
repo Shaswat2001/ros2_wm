@@ -45,6 +45,12 @@ wm_belief_publisher:
     dataset_seed: 42
     dataset_advance: true    # increment seed each tick for variety
 
+    # Action sampling for the predict loop (used in dataset/demo mode)
+    # These should match the loaded model's action space.
+    # For Atari (IRIS): discrete with 18 actions.
+    default_action_space: "discrete"
+    default_num_actions: 18
+
 # ── Rollout Visualizer ────────────────────────────────────────
 wm_rollout_visualizer:
   ros__parameters:
