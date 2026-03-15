@@ -48,7 +48,7 @@ class ModelServerNode(Node):
         self._total_predictions = 0
         self._total_rollouts = 0
         self._avg_predict_ms = 0.0
-        self._avf_forward_ms = 0.0
+        self._avg_forward_ms = 0.0
 
         # ── Callback group (allow concurrent service calls) ───
         self._cb_group = ReentrantCallbackGroup()
