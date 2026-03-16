@@ -479,14 +479,21 @@ class ModelServerNode(Node):
             recon = output.get('recon')
             if recon is not None:
                 frame = np.asarray(recon)
+                # Squeeze batch dims
+                while frame.ndim > 3:
+                    frame = frame.squeeze(0)
                 # CHW → HWC
-                if frame.ndim == 3 and frame.shape[0] in (1, 3, 4):
+                if frame.ndim == 3 and frame.shape[0] in (1, 3) and frame.shape[0] < frame.shape[1]:
                     frame = np.transpose(frame, (1, 2, 0))
-                # Normalize to uint8
+                # Float → uint8
                 if frame.dtype != np.uint8:
-                    if frame.max() <= 1.0:
-                        frame = (frame * 255.0).clip(0, 255)
-                    frame = frame.astype(np.uint8)
+                    fdata = np.asarray(frame, dtype=np.float64)
+                    if fdata.max() <= 1.0 and fdata.min() >= -0.01:
+                        fdata = fdata.clip(0.0, 1.0) * 255.0
+                    frame = fdata.clip(0, 255).astype(np.uint8)
+                # Squeeze single-channel (H,W,1) → (H,W)
+                if frame.ndim == 3 and frame.shape[2] == 1:
+                    frame = frame[:, :, 0]
                 frame = np.ascontiguousarray(frame)
 
                 response.recon_height = frame.shape[0]
@@ -759,7 +766,21 @@ class ModelServerNode(Node):
             terminated.append(bool(output.get('terminated', False)))
 
             if record_observations and output.get('recon') is not None:
-                frame = np.asarray(output['recon'], dtype=np.uint8)
+                frame = np.asarray(output['recon'], dtype=np.float64)
+                # Squeeze batch dim if present
+                while frame.ndim > 3:
+                    frame = frame.squeeze(0)
+                # CHW → HWC
+                if frame.ndim == 3 and frame.shape[0] in (1, 3):
+                    frame = np.transpose(frame, (1, 2, 0))
+                # Squeeze single channel: (H,W,1) → (H,W)
+                if frame.ndim == 3 and frame.shape[2] == 1:
+                    frame = frame.squeeze(2)
+                # float → uint8
+                if frame.dtype != np.uint8:
+                    if frame.max() <= 1.0:
+                        frame = (frame * 255.0).clip(0, 255)
+                    frame = frame.astype(np.uint8)
                 frames.append(frame)
 
             if terminated[-1]:
@@ -863,55 +884,102 @@ class ModelServerNode(Node):
         """
         Publish an observation or reconstruction image to /wm/viz/forward_frames.
 
-        Accepts raw numpy arrays from either the input observation (during
-        forward()) or the decoded reconstruction (from predict()). Handles
-        CHW→HWC, float→uint8, grayscale/RGB detection.
+        Matches the PygameRenderer._prepare_frame() logic from worldmodel_hub
+        exactly, then converts to a ROS Image message with correct encoding
+        and validated byte count.
         """
         if frame_data is None:
-            self.get_logger().warn('_publish_frame called with None')
             return
 
-        frame = np.asarray(frame_data, dtype=np.float64)
+        frame = np.asarray(frame_data)
 
         self.get_logger().debug(
-            f'_publish_frame: input shape={frame.shape}, '
-            f'dtype={frame.dtype}, min={frame.min():.3f}, max={frame.max():.3f}'
+            f'[frame_debug] raw input: shape={frame.shape}, dtype={frame.dtype}'
         )
 
-        # CHW → HWC
-        if frame.ndim == 3 and frame.shape[0] in (1, 3, 4):
-            frame = np.transpose(frame, (1, 2, 0))
+        # Squeeze any leftover batch dimensions: (1, C, H, W) → (C, H, W)
+        while frame.ndim > 3:
+            frame = frame.squeeze(0)
 
-        # Normalize to uint8
-        if frame.max() <= 1.0 and frame.min() >= 0.0:
-            frame = (frame * 255.0).clip(0, 255).astype(np.uint8)
-        elif frame.dtype != np.uint8:
+        if frame.ndim < 2:
+            self.get_logger().warn(
+                f'_publish_frame: unexpected shape {frame.shape}, skipping'
+            )
+            return
+
+        # 2D array = grayscale HW
+        if frame.ndim == 2:
+            pass  # already HW, handle below
+
+        # 3D: detect CHW vs HWC
+        elif frame.ndim == 3:
+            # CHW → HWC (C is 1 or 3, and is the smallest dim for typical images)
+            if frame.shape[0] in (1, 3) and frame.shape[0] < frame.shape[1]:
+                frame = np.transpose(frame, (1, 2, 0))
+
+        # Float → uint8
+        if frame.dtype != np.uint8:
+            frame = np.asarray(frame, dtype=np.float64)
+            if frame.max() <= 1.0 and frame.min() >= -0.01:
+                frame = (frame.clip(0.0, 1.0) * 255.0)
             frame = frame.clip(0, 255).astype(np.uint8)
 
         frame = np.ascontiguousarray(frame)
 
+        self.get_logger().debug(
+            f'[frame_debug] after processing: shape={frame.shape}, dtype={frame.dtype}'
+        )
+
+        # Determine encoding
+        if frame.ndim == 2:
+            h, w = frame.shape
+            encoding = 'mono8'
+            step = w
+        elif frame.ndim == 3 and frame.shape[2] == 3:
+            h, w = frame.shape[0], frame.shape[1]
+            encoding = 'rgb8'
+            step = w * 3
+        elif frame.ndim == 3 and frame.shape[2] == 1:
+            h, w = frame.shape[0], frame.shape[1]
+            frame = frame[:, :, 0]  # squeeze channel dim for mono8
+            encoding = 'mono8'
+            step = w
+        elif frame.ndim == 3 and frame.shape[2] == 4:
+            h, w = frame.shape[0], frame.shape[1]
+            frame = frame[:, :, :3]  # drop alpha
+            encoding = 'rgb8'
+            step = w * 3
+            frame = np.ascontiguousarray(frame)
+        else:
+            self.get_logger().warn(
+                f'_publish_frame: unhandled shape {frame.shape}, skipping'
+            )
+            return
+
+        raw = frame.tobytes()
+        expected_size = h * step
+        if len(raw) != expected_size:
+            self.get_logger().error(
+                f'Frame size mismatch: {h}x{w} {encoding} expects '
+                f'{expected_size} bytes but got {len(raw)}. '
+                f'Frame shape={frame.shape}, dtype={frame.dtype}'
+            )
+            return
+
+        self.get_logger().debug(
+            f'[frame_debug] publishing: {w}x{h} {encoding} step={step} '
+            f'data={len(raw)} bytes (expected={expected_size})'
+        )
+
         msg = Image()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = 'wm_imagined'
-        msg.height = frame.shape[0]
-        msg.width = frame.shape[1]
-        if frame.ndim == 3 and frame.shape[2] == 3:
-            msg.encoding = 'rgb8'
-            msg.step = frame.shape[1] * 3
-        elif frame.ndim == 3 and frame.shape[2] == 1:
-            frame = frame[:, :, 0]
-            msg.encoding = 'mono8'
-            msg.step = frame.shape[1]
-        else:
-            msg.encoding = 'mono8'
-            msg.step = frame.shape[1]
+        msg.height = h
+        msg.width = w
+        msg.encoding = encoding
+        msg.step = step
         msg.is_bigendian = False
-        msg.data = frame.tobytes()
-
-        self.get_logger().info(
-            f'Publishing frame: {msg.width}x{msg.height} {msg.encoding} '
-            f'({len(msg.data)} bytes) to /wm/viz/forward_frames'
-        )
+        msg.data = raw
         self.pub_forward_frames.publish(msg)
 
 def main(args=None):

@@ -45,11 +45,19 @@ wm_belief_publisher:
     dataset_seed: 42
     dataset_advance: true    # increment seed each tick for variety
 
-    # Action sampling for the predict loop (used in dataset/demo mode)
+    # Action sampling for the predict loop (used when continuous_predict is true)
     # These should match the loaded model's action space.
     # For Atari (IRIS): discrete with 18 actions.
     default_action_space: "discrete"
     default_num_actions: 18
+
+    # If true, continuously call predict() with random actions after
+    # forward() — streams imagined frames to /wm/viz/forward_frames.
+    # If false (default), only forward() once to initialize the belief
+    # state, then sit idle. Service calls (plan_action, step_action)
+    # are faster when this is off because no background predict loop
+    # competes for the model lock.
+    continuous_predict: false
 
 # ── Rollout Visualizer ────────────────────────────────────────
 wm_rollout_visualizer:

@@ -39,6 +39,7 @@ class BeliefPublisherNode(Node):
         self.declare_parameter('dataset_advance', True)
         self.declare_parameter('default_action_space', 'discrete')
         self.declare_parameter('default_num_actions', 18)
+        self.declare_parameter('continuous_predict', False)  # If true, step with random actions continuously
 
         # ── State ─────────────────────────────────────────────
         self._latest_image: Optional[np.ndarray] = None
@@ -101,9 +102,10 @@ class BeliefPublisherNode(Node):
         rate = self.get_parameter('publish_rate_hz').value
         self.create_timer(1.0 / rate, self._tick)
 
+        continuous = self.get_parameter('continuous_predict').value
         self.get_logger().info(
-            f'BeliefPublisherNode ready (mode={obs_mode}, rate={rate}Hz). '
-            f'Waiting for model_server...'
+            f'BeliefPublisherNode ready (mode={obs_mode}, rate={rate}Hz, '
+            f'continuous_predict={continuous}). Waiting for model_server...'
         )
 
     def _on_image(self, msg: Image):
@@ -148,7 +150,7 @@ class BeliefPublisherNode(Node):
 
         if not self._model_initialized:
             self._call_forward()
-        else:
+        elif self.get_parameter('continuous_predict').value:
             self._call_step()
 
     def _call_forward(self):
@@ -184,7 +186,16 @@ class BeliefPublisherNode(Node):
             if response.success:
                 self._model_initialized = True
                 self._step_count = 0
-                self.get_logger().info('Model initialized via forward(). Starting predict loop.')
+                if self.get_parameter('continuous_predict').value:
+                    self.get_logger().info(
+                        'Model initialized via forward(). Starting continuous predict loop.'
+                    )
+                else:
+                    self.get_logger().info(
+                        'Model initialized via forward(). Idle mode — '
+                        'use /wm/plan_action, /wm/step_action, or set '
+                        'continuous_predict:=true to stream frames.'
+                    )
             else:
                 self.get_logger().warn(f'Forward failed: {response.message}')
         except Exception as e:

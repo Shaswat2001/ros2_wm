@@ -5,6 +5,7 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
+
 def generate_launch_description():
 
     pkg_share = FindPackageShare('wm_runtime')
@@ -25,6 +26,8 @@ def generate_launch_description():
                               description='Image topic (for obs_mode=image)'),
         DeclareLaunchArgument('publish_rate_hz', default_value='10.0',
                               description='Belief publish rate (Hz)'),
+        DeclareLaunchArgument('continuous_predict', default_value='false',
+                              description='Continuously step with random actions (streams frames)'),
         DeclareLaunchArgument('rviz', default_value='true',
                               description='Launch RViz'),
         DeclareLaunchArgument('rviz_config', default_value=PathJoinSubstitution([
@@ -65,6 +68,7 @@ def generate_launch_description():
                 'obs_mode': LaunchConfiguration('obs_mode'),
                 'image_topic': LaunchConfiguration('image_topic'),
                 'publish_rate_hz': LaunchConfiguration('publish_rate_hz'),
+                'continuous_predict': LaunchConfiguration('continuous_predict'),
             },
         ],
         output='screen',
